@@ -1,0 +1,1302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CleanResume - 严谨专业级简历排版系统</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome 图标库 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Marked.js 用于 Markdown 解析 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+  <!-- html2pdf.js 用于纯前端高清 PDF 导出 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+  <style>
+    /* 核心排版变量与四级字号规范 */
+    :root {
+      --fz-title: 25px;       /* 第1字号：姓名大标题 */
+      --fz-section: 13.5px;   /* 第2字号：小节标题 */
+      --fz-body: 10px;        /* 第3字号：正文 */
+      --fz-meta: 9px;         /* 第4字号：命令/补充说明/时间/地点 */
+      --theme-color: #000000; /* 标题与分割线颜色 */
+      --line-height: 1.48;
+      --pad-v: 14mm;          /* 上下页边距 */
+      --pad-h: 16mm;          /* 左右页边距 */
+      --section-spacing: 9px;
+      --item-spacing: 4px;
+      --preview-zoom: 1;      /* 视口缩放系数 */
+    }
+
+    /* A4 纸张物理容器 (210mm x 297mm) */
+    .a4-wrapper {
+      transform-origin: top center;
+      transition: transform 0.15s ease;
+    }
+
+    .a4-page {
+      width: 210mm;
+      min-height: 297mm;
+      padding: var(--pad-v) var(--pad-h);
+      margin: 0 auto;
+      background: white;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+      position: relative;
+      box-sizing: border-box;
+      transition: padding 0.15s ease;
+    }
+
+    /* 打印样式 — 隐藏工具栏，由 JS 接管简历 DOM 后正常渲染 */
+    @page {
+      size: A4 portrait;
+      margin: 0;
+    }
+
+    @media print {
+      html, body {
+        width: 210mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: white !important;
+        /* 关键：不限制高度、不裁剪溢出，允许内容自然分页到多页 */
+        height: auto !important;
+        overflow: visible !important;
+        display: block !important;
+      }
+
+      /* 只打印简历文档本身，隐藏页面其余所有元素（含占位 flex 容器） */
+      body > *:not(#resume-document) {
+        display: none !important;
+      }
+    }
+
+    /* 自定义轻量滚动条 */
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    /* 严格按照参考图还原的排版细节 */
+    .resume-render {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      color: #111827;
+      line-height: var(--line-height);
+    }
+    
+    /* 姓名大标题 (第1字号) - 颜色与标题主题色联动 */
+    .resume-render .res-name {
+      font-size: var(--fz-title);
+      font-weight: 800;
+      color: var(--theme-color);
+      letter-spacing: -0.01em;
+      line-height: 1.1;
+      transition: color 0.15s ease;
+    }
+
+    /* 姓名同行的手机号 (第4字号) */
+    .resume-render .res-phone-tag {
+      font-size: calc(var(--fz-meta) * 0.95);
+      color: #4b5563;
+      font-weight: 500;
+      margin-left: 8px;
+    }
+
+    /* 小节标题 (第2字号) + 贯穿横细线 */
+    .resume-render .res-section-title {
+      font-size: var(--fz-section);
+      font-weight: 800;
+      color: var(--theme-color);
+      border-bottom: 1.2px solid var(--theme-color);
+      padding-bottom: 2px;
+      margin-top: var(--section-spacing);
+      margin-bottom: var(--item-spacing);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    /* 正文字号 (第3字号) */
+    .resume-render .res-body, .resume-render p, .resume-render li {
+      font-size: var(--fz-body);
+      color: #1f2937;
+    }
+
+    /* 补充说明/时间/地点 (第4字号) */
+    .resume-render .res-meta, .resume-render .meta-item, .resume-render .res-date {
+      font-size: var(--fz-meta);
+      color: #374151;
+    }
+
+    .resume-render ul {
+      list-style-type: none;
+      padding-left: 0;
+      margin: 2px 0 4px 0;
+    }
+
+    .resume-render li {
+      margin-bottom: 2.5px;
+      position: relative;
+      padding-left: 12px;
+      text-align: justify;
+    }
+
+    .resume-render li::before {
+      content: "•";
+      position: absolute;
+      left: 2px;
+      color: #1f2937;
+      font-size: 1.1em;
+      line-height: 1;
+    }
+
+    .resume-render strong {
+      font-weight: 700;
+      color: #000000;
+    }
+
+    .resume-render a {
+      color: inherit;
+      text-decoration: underline;
+    }
+
+    /* 分页辅助参考线 */
+    .page-indicator-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 2px;
+      border-top: 1.5px dashed #94a3b8;
+      pointer-events: none;
+      z-index: 20;
+    }
+    .page-indicator-line::after {
+      content: attr(data-label);
+      position: absolute;
+      right: 12px;
+      top: -12px;
+      background: #64748b;
+      color: white;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+  </style>
+</head>
+
+<body class="bg-slate-100 h-screen flex flex-col overflow-hidden text-slate-800">
+
+  <!-- 顶部导航栏 -->
+  <header class="no-print bg-white border-b border-slate-200 px-5 py-2.5 flex items-center justify-between shadow-xs z-30 flex-shrink-0">
+    <div class="flex items-center space-x-2.5">
+      <div class="w-8 h-8 bg-slate-900 rounded-md flex items-center justify-center text-white shadow-sm font-bold text-sm">
+        <i class="fa-solid fa-file-invoice"></i>
+      </div>
+      <h1 class="font-bold text-slate-900 text-base tracking-tight">CleanResume</h1>
+    </div>
+
+    <!-- 中英文切换选项卡 -->
+    <div class="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200">
+      <button id="tab-zh" onclick="switchLang('zh')" class="px-3 py-1 text-xs font-semibold rounded-md transition-all bg-white text-slate-900 shadow-xs">
+        <i class="fa-solid fa-language mr-1"></i> 中文简历 (1页限制)
+      </button>
+      <button id="tab-en" onclick="switchLang('en')" class="px-3 py-1 text-xs font-semibold rounded-md transition-all text-slate-600 hover:text-slate-900">
+        <i class="fa-solid fa-globe mr-1"></i> English Resume (2页限制)
+      </button>
+    </div>
+
+    <!-- 顶部操作按钮 -->
+    <div class="flex items-center space-x-2">
+      <button onclick="saveState()" id="btn-save" class="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-semibold flex items-center shadow-sm transition active:scale-95 border border-slate-200">
+        <i class="fa-solid fa-floppy-disk mr-1.5 text-slate-500"></i> 保存
+      </button>
+      <button onclick="exportToPDF()" id="btn-export" class="px-3.5 py-1.5 bg-slate-900 hover:bg-black text-white rounded-md text-xs font-semibold flex items-center shadow-sm transition active:scale-95">
+        <i class="fa-solid fa-file-pdf mr-1.5 text-rose-400"></i> 导出 PDF（文字可选）
+      </button>
+    </div>
+  </header>
+
+  <div class="flex-1 flex overflow-hidden">
+    
+    <!-- 左侧控制面板与编辑器 (占比 44%) -->
+    <div class="no-print w-[44%] min-w-[420px] bg-white border-r border-slate-200 flex flex-col h-full shadow-sm z-10">
+      
+      <!-- 黑色顶部条与 Tab 切换栏 -->
+      <div class="bg-black text-white px-4 pt-3 pb-2.5 flex flex-col gap-2.5 flex-shrink-0">
+        <div class="flex items-center justify-between">
+          <div class="font-extrabold text-sm tracking-wider uppercase flex items-center">
+            <span class="inline-block w-2 h-2 rounded-full bg-white mr-2"></span>
+            CleanResume
+          </div>
+        </div>
+        <!-- 内容 / 调整 Tab 按钮 -->
+        <div class="flex items-center space-x-1 bg-neutral-900 p-1 rounded-lg w-fit border border-neutral-800 text-xs">
+          <button id="left-tab-content" onclick="switchLeftTab('content')" class="px-4 py-1 rounded-md font-semibold transition-all bg-white text-black shadow-xs">
+            内容
+          </button>
+          <button id="left-tab-settings" onclick="switchLeftTab('settings')" class="px-4 py-1 rounded-md font-medium text-neutral-400 hover:text-white transition-all">
+            调整
+          </button>
+        </div>
+      </div>
+
+      <!-- TAB 1: 内容编辑区 (占满剩余高度) -->
+      <div id="pane-content" class="flex-1 flex flex-col overflow-hidden bg-white">
+        <!-- 分区 1：姓名与电话 -->
+        <div class="border-b border-slate-200 flex-shrink-0">
+          <div class="px-3.5 py-1.5 bg-slate-100/90 border-b border-slate-200 flex items-center justify-between text-xs text-slate-700 font-bold">
+            <span class="flex items-center">
+              <span class="w-4 h-4 bg-slate-800 text-white rounded-full flex items-center justify-center text-[10px] mr-1.5 font-sans">1</span>
+              姓名与电话
+            </span>
+            <span class="text-[10px] text-slate-400 font-normal">格式：姓名 | 电话</span>
+          </div>
+          <div class="p-2">
+            <input type="text" id="editor-name-phone"
+              class="w-full px-2.5 py-1.5 font-mono text-xs text-slate-800 bg-slate-50 border border-slate-200 rounded focus:bg-white focus:border-slate-800 focus:outline-none transition"
+              placeholder="例如：你的姓名 | +86 138 0000 0000"
+              oninput="onContentChange()">
+          </div>
+        </div>
+
+        <!-- 分区 2：姓名下方的联系方式与状态 -->
+        <div class="border-b border-slate-200 flex-shrink-0">
+          <div class="px-3.5 py-1.5 bg-slate-100/90 border-b border-slate-200 flex items-center justify-between text-xs text-slate-700 font-bold">
+            <span class="flex items-center">
+              <span class="w-4 h-4 bg-slate-800 text-white rounded-full flex items-center justify-center text-[10px] mr-1.5 font-sans">2</span>
+              姓名下联系方式 (Markdown 列表)
+            </span>
+            <span class="text-[10px] text-slate-400 font-normal">支持邮箱、领英、地点及状态</span>
+          </div>
+          <div class="p-2">
+            <textarea id="editor-contact" rows="4"
+              class="w-full p-2 font-mono text-xs leading-relaxed text-slate-800 bg-slate-50 border border-slate-200 rounded resize-none focus:bg-white focus:border-slate-800 focus:outline-none transition"
+              placeholder="- 邮箱&#10;- 领英主页&#10;- **目前地址**：某某城市"
+              oninput="onContentChange()"></textarea>
+          </div>
+        </div>
+
+        <!-- 分区 3：简历正文 -->
+        <div class="flex-1 flex flex-col min-h-0">
+          <div class="px-3.5 py-1.5 bg-slate-100/90 border-b border-slate-200 flex items-center justify-between text-xs text-slate-700 font-bold flex-shrink-0">
+            <span class="flex items-center">
+              <span class="w-4 h-4 bg-slate-800 text-white rounded-full flex items-center justify-center text-[10px] mr-1.5 font-sans">3</span>
+              简历正文 (Markdown 格式)
+            </span>
+            <span class="text-[10px] text-slate-400 font-normal">支持 ## 章节、### 经历行、- 列表</span>
+          </div>
+          <div class="flex-1 p-2">
+            <textarea id="editor-body"
+              class="w-full h-full p-2.5 font-mono text-xs leading-relaxed text-slate-800 bg-slate-50 border border-slate-200 rounded resize-none focus:bg-white focus:border-slate-800 focus:outline-none transition"
+              placeholder="在此输入简历正文（## 个人简介、## 教育经历、## 专业技能、## 职业经历、## 项目经历）..."
+              oninput="onContentChange()"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: 调整参数区 (独立滚动与配置) -->
+      <div id="pane-settings" class="flex-1 p-4 overflow-y-auto bg-slate-50 space-y-3.5 hidden">
+        
+        <!-- (1) 页边距控制面板 -->
+        <div class="bg-white p-3 rounded-lg border border-slate-200 shadow-xs space-y-2.5">
+          <div class="flex items-center justify-between pb-1.5 border-b border-slate-100">
+            <span class="text-xs font-bold text-slate-800 flex items-center">
+              <i class="fa-solid fa-arrows-up-down-left-right text-slate-700 mr-1.5 text-xs"></i> 页面边距调节 (Padding)
+            </span>
+            <span class="text-[10px] text-slate-400">实时微调纸张可打印区</span>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3 pt-0.5 text-xs">
+            <!-- 上下边距 -->
+            <div>
+              <div class="flex items-center justify-between text-[11px] mb-1 text-slate-600">
+                <span>上下边距 (Vertical):</span>
+                <span id="val-pad-v" class="font-mono font-bold text-slate-800">14mm</span>
+              </div>
+              <input type="range" id="slider-pad-v" min="8" max="28" step="1" value="14" 
+                class="w-full accent-slate-800 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                oninput="applyPadding('v', this.value)">
+            </div>
+            <!-- 左右边距 -->
+            <div>
+              <div class="flex items-center justify-between text-[11px] mb-1 text-slate-600">
+                <span>左右边距 (Horizontal):</span>
+                <span id="val-pad-h" class="font-mono font-bold text-slate-800">16mm</span>
+              </div>
+              <input type="range" id="slider-pad-h" min="10" max="28" step="1" value="16" 
+                class="w-full accent-slate-800 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                oninput="applyPadding('h', this.value)">
+            </div>
+          </div>
+        </div>
+
+        <!-- (2) 4级字号与上下限微调 -->
+        <div class="bg-white p-3 rounded-lg border border-slate-200 shadow-xs space-y-3">
+          <div class="flex items-center justify-between pb-1.5 border-b border-slate-100">
+            <span class="text-xs font-bold text-slate-800 flex items-center">
+              <i class="fa-solid fa-text-height text-slate-700 mr-1.5 text-xs"></i> 严格四级字号与上下限设置
+            </span>
+            <span class="text-[10px] text-slate-400">上下限可直接改动</span>
+          </div>
+
+          <!-- 第 1 字号: 姓名大标题 -->
+          <div class="grid grid-cols-12 gap-2 items-center text-xs">
+            <span class="col-span-4 text-slate-600 font-medium">1. 姓名大标题:</span>
+            <div class="col-span-8 flex items-center space-x-1.5">
+              <input type="number" id="fz-title-min" value="18" min="14" max="26" class="w-11 text-center text-[11px] border rounded py-0.5" title="最小值" onchange="updateBounds()">
+              <input type="range" id="slider-title" min="18" max="32" step="0.5" value="25" class="flex-1 accent-slate-800 h-1.5 bg-slate-200 rounded-lg cursor-pointer" oninput="applyFontSize('title', this.value)">
+              <input type="number" id="fz-title-max" value="32" min="22" max="40" class="w-11 text-center text-[11px] border rounded py-0.5" title="最大值" onchange="updateBounds()">
+              <span id="val-title" class="w-9 text-right text-slate-700 font-mono text-[11px]">25px</span>
+            </div>
+          </div>
+
+          <!-- 第 2 字号: 小节标题 -->
+          <div class="grid grid-cols-12 gap-2 items-center text-xs">
+            <span class="col-span-4 text-slate-600 font-medium">2. 小节标题:</span>
+            <div class="col-span-8 flex items-center space-x-1.5">
+              <input type="number" id="fz-sec-min" value="11" min="10" max="16" class="w-11 text-center text-[11px] border rounded py-0.5" title="最小值" onchange="updateBounds()">
+              <input type="range" id="slider-sec" min="11" max="18" step="0.5" value="13.5" class="flex-1 accent-slate-800 h-1.5 bg-slate-200 rounded-lg cursor-pointer" oninput="applyFontSize('sec', this.value)">
+              <input type="number" id="fz-sec-max" value="18" min="14" max="24" class="w-11 text-center text-[11px] border rounded py-0.5" title="最大值" onchange="updateBounds()">
+              <span id="val-sec" class="w-9 text-right text-slate-700 font-mono text-[11px]">13.5px</span>
+            </div>
+          </div>
+
+          <!-- 第 3 字号: 正文字号 -->
+          <div class="grid grid-cols-12 gap-2 items-center text-xs">
+            <span class="col-span-4 text-slate-600 font-medium">3. 正文内容:</span>
+            <div class="col-span-8 flex items-center space-x-1.5">
+              <input type="number" id="fz-body-min" value="8.5" min="7" max="12" step="0.5" class="w-11 text-center text-[11px] border rounded py-0.5" title="最小值" onchange="updateBounds()">
+              <input type="range" id="slider-body" min="8.5" max="13" step="0.25" value="10" class="flex-1 accent-slate-800 h-1.5 bg-slate-200 rounded-lg cursor-pointer" oninput="applyFontSize('body', this.value)">
+              <input type="number" id="fz-body-max" value="13" min="10" max="16" step="0.5" class="w-11 text-center text-[11px] border rounded py-0.5" title="最大值" onchange="updateBounds()">
+              <span id="val-body" class="w-9 text-right text-slate-700 font-mono text-[11px]">10px</span>
+            </div>
+          </div>
+
+          <!-- 第 4 字号: 命令/补充/元信息 (联动) -->
+          <div class="grid grid-cols-12 gap-2 items-center text-xs">
+            <span class="col-span-4 text-slate-600 font-medium">4. 补充/命令/时间:</span>
+            <div class="col-span-8 flex items-center justify-between text-slate-500 text-[11px] px-1">
+              <span class="italic text-[10.5px]">自动联动 (正文 × 0.9)</span>
+              <span id="val-meta" class="font-mono text-slate-800 font-semibold">9px</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- (3) 标题颜色与照片占位符 -->
+        <div class="grid grid-cols-2 gap-3">
+          <!-- 标题与姓名颜色更改 -->
+          <div class="bg-white p-3 rounded-lg border border-slate-200 shadow-xs flex flex-col justify-between">
+            <label class="text-xs font-bold text-slate-700 flex items-center mb-1.5">
+              <i class="fa-solid fa-palette text-slate-700 mr-1.5"></i> 标题与姓名颜色
+            </label>
+            <div class="flex items-center space-x-2">
+              <input type="color" id="color-picker" value="#000000" onchange="applyColor(this.value)" class="w-7 h-7 rounded border border-slate-300 cursor-pointer p-0.5">
+              <div class="flex items-center space-x-1.5">
+                <button onclick="applyColor('#000000')" class="w-4 h-4 rounded-full bg-black border border-slate-300" title="经典黑 (原图)"></button>
+                <button onclick="applyColor('#1e3a8a')" class="w-4 h-4 rounded-full bg-blue-900 border border-slate-300" title="深蓝"></button>
+                <button onclick="applyColor('#0f766e')" class="w-4 h-4 rounded-full bg-teal-800 border border-slate-300" title="深青绿"></button>
+                <button onclick="applyColor('#475569')" class="w-4 h-4 rounded-full bg-slate-600 border border-slate-300" title="深灰"></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右上角照片占位符开关 -->
+          <div class="bg-white p-3 rounded-lg border border-slate-200 shadow-xs flex flex-col justify-between">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-bold text-slate-700 flex items-center">
+                <i class="fa-solid fa-image-portrait text-slate-700 mr-1.5"></i> 右上角照片开关
+              </label>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="photo-toggle" class="sr-only peer" checked onchange="togglePhoto(this.checked)">
+                <div class="w-7 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-slate-900"></div>
+              </label>
+            </div>
+            <span class="text-[10px] text-slate-400 mt-1">控制右上角寸照占位图</span>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- 右侧区域：排版实时预览画布 (占比 56%) -->
+    <div class="flex-1 bg-slate-200/80 overflow-y-auto flex flex-col items-center p-6 relative" id="preview-container">
+      
+      <!-- 简历上方：PDF 文件名设置工具栏 (目标公司_目标职位_姓名_简历) -->
+      <div class="no-print w-full max-w-[210mm] mb-4 bg-white/95 backdrop-blur border border-slate-300/80 rounded-lg shadow-sm p-3 flex flex-col gap-2.5">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-800 flex items-center">
+            <i class="fa-regular fa-file-lines text-blue-600 mr-1.5 text-sm"></i> 导出 PDF 文件名设置
+          </span>
+          <span class="text-[11px] text-slate-400">格式：目标公司_目标职位_姓名_简历</span>
+        </div>
+
+        <!-- 字段快捷输入与最终合成文件名输入 -->
+        <div class="grid grid-cols-12 gap-2 items-center text-xs">
+          <div class="col-span-3 flex items-center">
+            <span class="text-slate-500 mr-1 whitespace-nowrap text-[11px]">公司:</span>
+            <input type="text" id="fn-company" value="腾讯" placeholder="如：腾讯" 
+              class="w-full px-2 py-1 text-xs border border-slate-200 rounded bg-slate-50 focus:bg-white focus:border-blue-500 focus:outline-none transition"
+              oninput="assembleFileName()">
+          </div>
+          <div class="col-span-3 flex items-center">
+            <span class="text-slate-500 mr-1 whitespace-nowrap text-[11px]">职位:</span>
+            <input type="text" id="fn-job" value="产品经理" placeholder="如：产品经理" 
+              class="w-full px-2 py-1 text-xs border border-slate-200 rounded bg-slate-50 focus:bg-white focus:border-blue-500 focus:outline-none transition"
+              oninput="assembleFileName()">
+          </div>
+          <div class="col-span-6 flex items-center">
+            <span class="text-slate-500 mr-1 whitespace-nowrap text-[11px]">最终文件名:</span>
+            <div class="flex-1 flex items-center">
+              <input type="text" id="export-filename" value="腾讯_产品经理_你的姓名_简历" 
+                class="w-full px-2.5 py-1 text-xs font-mono font-medium border border-blue-300 rounded-l bg-blue-50/40 text-slate-900 focus:bg-white focus:border-blue-500 focus:outline-none transition"
+                placeholder="导出文件名">
+              <span class="px-2 py-1 bg-slate-100 border border-l-0 border-slate-200 text-slate-500 rounded-r text-xs font-mono">.pdf</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 页面状态浮动指示徽标与缩放控制 -->
+      <div class="no-print fixed top-16 right-8 z-20 flex items-center space-x-2">
+        <!-- 画布缩放工具条 -->
+        <div class="bg-white/95 backdrop-blur shadow-sm border border-slate-200 text-slate-700 px-2 py-1 rounded-full text-xs font-medium flex items-center space-x-1.5">
+          <button onclick="adjustZoom(-0.05)" class="w-5 h-5 rounded hover:bg-slate-100 flex items-center justify-center font-bold" title="缩小">-</button>
+          <span id="zoom-level-text" class="w-10 text-center font-mono text-[11px]">100%</span>
+          <button onclick="adjustZoom(0.05)" class="w-5 h-5 rounded hover:bg-slate-100 flex items-center justify-center font-bold" title="放大">+</button>
+          <button onclick="autoFitZoom()" class="px-1.5 py-0.5 text-[10px] bg-slate-100 hover:bg-slate-200 rounded ml-1 font-sans">自适应宽</button>
+        </div>
+      </div>
+
+      <!-- A4 缩放包装容器 -->
+      <div id="a4-wrapper" class="a4-wrapper">
+        <!-- A4 简历纸张容器 (被导出的真实 DOM) -->
+        <div id="resume-document" class="a4-page resume-render flex flex-col justify-start">
+          
+          <!-- 头部 Header: 完全根据参考图结构还原 -->
+          <div class="flex items-start justify-between pb-1.5 mb-1" id="resume-header-block">
+            
+            <!-- 左侧与中间：姓名、手机、联系方式与地址分栏 -->
+            <div class="flex-1 pr-6" id="resume-header-info">
+              
+              <!-- 姓名大标题 + 手机号 同行并列 -->
+              <div class="flex items-baseline mb-1">
+                <span id="res-name-display" class="res-name">你的姓名</span>
+                <span id="res-phone-display" class="res-phone-tag">+86 138 0000 0000</span>
+              </div>
+
+              <!-- 两列并排的详细元信息 (邮箱/领英 与 地址/到岗状态) -->
+              <div class="grid grid-cols-12 gap-2 text-slate-700 res-meta mt-1">
+                <!-- 左列：邮箱、领英 -->
+                <div class="col-span-6 space-y-0.5" id="res-contact-col">
+                  <div>your.email@example.com</div>
+                  <div>your.school@example.edu</div>
+                  <div><a href="https://linkedin.com/in/your-profile" target="_blank" class="hover:underline">linkedin.com/in/your-profile</a></div>
+                </div>
+                
+                <!-- 右列：目前地址 / 到岗时间 -->
+                <div class="col-span-6 space-y-0.5" id="res-address-col">
+                  <div><strong>目前地址：</strong>某某城市</div>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- 右侧：照片占位符 (灰色框，无渐变效果) -->
+            <div id="photo-container" class="w-[84px] h-[106px] rounded bg-slate-200 border border-slate-300 flex flex-col items-center justify-center text-slate-500 flex-shrink-0 shadow-xs overflow-hidden transition-all">
+              <i class="fa-regular fa-user text-3xl mb-1 text-slate-400"></i>
+              <span class="text-[10px] text-slate-500 font-medium">照片占位</span>
+            </div>
+
+          </div>
+
+          <!-- 简历主体内容渲染容器 -->
+          <div id="resume-body-content" class="flex-1">
+            <!-- 由 Markdown 实时解析渲染 -->
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- 操作 Toast 提示 -->
+  <div id="toast" class="no-print fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/90 backdrop-blur text-white px-4 py-2 rounded-lg text-xs shadow-xl opacity-0 pointer-events-none transition-all duration-300 flex items-center space-x-2 z-50">
+    <i id="toast-icon" class="fa-solid fa-circle-check text-emerald-400"></i>
+    <span id="toast-msg">操作成功</span>
+  </div>
+
+  <script>
+    // 全局状态管理
+    let currentLang = 'zh'; // 'zh' 或 'en'
+    let showPhoto = true;
+    let currentZoom = 1;
+    let currentLeftTab = 'content'; // 'content' 或 'settings'
+
+    // 左侧 Tab 切换逻辑
+    function switchLeftTab(tab) {
+      currentLeftTab = tab;
+      const tabContent = document.getElementById('left-tab-content');
+      const tabSettings = document.getElementById('left-tab-settings');
+      const paneContent = document.getElementById('pane-content');
+      const paneSettings = document.getElementById('pane-settings');
+
+      if (tab === 'content') {
+        tabContent.className = "px-4 py-1 rounded-md font-semibold transition-all bg-white text-black shadow-xs";
+        tabSettings.className = "px-4 py-1 rounded-md font-medium text-neutral-400 hover:text-white transition-all";
+        paneContent.classList.remove('hidden');
+        paneSettings.classList.add('hidden');
+      } else {
+        tabSettings.className = "px-4 py-1 rounded-md font-semibold transition-all bg-white text-black shadow-xs";
+        tabContent.className = "px-4 py-1 rounded-md font-medium text-neutral-400 hover:text-white transition-all";
+        paneSettings.classList.remove('hidden');
+        paneContent.classList.add('hidden');
+      }
+    }
+
+    // 内置双语简历三模块分区数据
+    const resumeData = {
+      zh: {
+        namePhone: "你的姓名 | +86 138 0000 0000",
+        contact: `- your.email@example.com
+- your.school@example.edu
+- linkedin.com/in/your-profile
+- **目前地址**：某某城市`,
+        body: `## 个人简介
+（此处填写个人简介：介绍你的专业背景、核心能力、代表性经历，以及你希望在哪个领域发展。）
+
+## 教育经历
+### 某某大学 硕士 某某专业 | 20XX.9～至今
+- **细分方向**：某某方向
+- **相关课程**：课程一、课程二、课程三
+
+### 某某大学 本科 某某专业 | 20XX.9～20XX.6
+- **GPA**：X.XX/X.XX
+- **相关课程**：课程一、课程二
+
+## 专业技能
+- **编程语言**：语言一、语言二
+- **工具与平台**：工具一、工具二
+
+## 职业经历
+### 某某公司 | 某某职位 | 20XX.X～20XX.X
+（一句话描述公司业务与你负责的职责范围）
+- 工作内容一
+- 工作内容二
+- 工作内容三
+
+## 项目经历
+### 某某项目 | 某某角色 | 20XX.X～20XX.X
+（一句话描述项目背景、目标与你的角色）
+- 项目内容一
+- 项目内容二
+- 项目内容三`
+      },
+
+      en: {
+        namePhone: "YOUR NAME | +31 6 0000 0000",
+        contact: `- your.email@example.com
+- your.school@example.edu
+- linkedin.com/in/your-profile
+- **Location**: Your City, Country
+- Available from July 2026 for 4-month internship`,
+        body: `## SUMMARY
+(Fill in your summary here: your background, core strengths, representative experience, and the field you want to grow in.)
+
+## EDUCATION
+### MSc Your Programme - Your University | Sep 20XX - Present
+- **Program Theme**: Your specialisation
+- **Relevant Coursework**: Course One, Course Two, Course Three
+
+### BEng Your Programme - Your University | Sep 20XX - Jun 20XX
+- **GPA**: X.XX/4.00
+- **Relevant Coursework**: Course One, Course Two
+
+## SKILLS
+- **Programming**: Language One, Language Two
+- **Tools & Platforms**: Tool One, Tool Two
+- **Languages**: Your Language (Native), English (fluent)
+
+## CAREER EXPERIENCE
+### Your Job Title - Your Company | Jun 20XX - Aug 20XX
+(One line on the company's business and your scope of responsibility.)
+- Achievement or responsibility one
+- Achievement or responsibility two
+
+### Your Job Title - Your Company | Jun 20XX - Dec 20XX
+(One line on the company's business and your scope of responsibility.)
+- Achievement or responsibility one
+- Achievement or responsibility two`
+      }
+    };
+
+    function loadEditorsFromData(lang) {
+      const data = resumeData[lang];
+      const elNP = document.getElementById('editor-name-phone');
+      const elContact = document.getElementById('editor-contact');
+      const elBody = document.getElementById('editor-body');
+
+      if (elNP) elNP.value = data.namePhone;
+      if (elContact) elContact.value = data.contact;
+      if (elBody) elBody.value = data.body;
+    }
+
+    // 按语言独立加载已保存内容；若从未保存过则编辑器保持空白
+    function loadStateForLang(lang) {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const full = JSON.parse(raw);
+        if (!full) return;
+
+        // 读取对应语言的内容（独立存储，互不干扰）
+        const langData = full[lang];
+        if (!langData) return;   // 该语言从未保存过，保持空白
+
+        const elNP = document.getElementById('editor-name-phone');
+        const elContact = document.getElementById('editor-contact');
+        const elBody = document.getElementById('editor-body');
+
+        if (elNP     && langData.namePhone !== undefined) elNP.value     = langData.namePhone;
+        if (elContact && langData.contact   !== undefined) elContact.value = langData.contact;
+        if (elBody   && langData.body       !== undefined) elBody.value   = langData.body;
+      } catch (e) {
+        // 静默忽略
+      }
+    }
+
+    function initApp() {
+      setupMarkedRenderer();
+
+      // 优先从 localStorage 恢复；若无可用数据则加载内置简历
+      const hasState = loadState();
+      if (!hasState) {
+        loadEditorsFromData(currentLang);
+      }
+
+      renderResume();
+      assembleFileName();
+      autoFitZoom();
+      checkPageConstraints();
+    }
+
+    // 文件名构造与动态联动
+    function getParsedName() {
+      const el = document.getElementById('res-name-display');
+      return (el && el.innerText.trim()) ? el.innerText.trim() : (currentLang === 'zh' ? '你的姓名' : 'Your Name');
+    }
+
+    function assembleFileName() {
+      const companyInput = document.getElementById('fn-company');
+      const jobInput = document.getElementById('fn-job');
+      const fnInput = document.getElementById('export-filename');
+
+      const company = (companyInput && companyInput.value.trim()) ? companyInput.value.trim() : (currentLang === 'zh' ? '目标公司' : 'TargetCompany');
+      const job = (jobInput && jobInput.value.trim()) ? jobInput.value.trim() : (currentLang === 'zh' ? '目标职位' : 'TargetRole');
+      const candidateName = getParsedName();
+
+      if (currentLang === 'zh') {
+        fnInput.value = `${company}_${job}_${candidateName}_简历`;
+      } else {
+        const safeCompany = company.replace(/\s+/g, '');
+        const safeJob = job.replace(/\s+/g, '');
+        const safeName = candidateName.replace(/\s+/g, '');
+        fnInput.value = `${safeCompany}_${safeJob}_${safeName}_Resume`;
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initApp);
+    } else {
+      initApp();
+    }
+    window.addEventListener('load', initApp);
+    window.addEventListener('resize', autoFitZoom);
+
+    // Markdown 渲染器配置（含对外部 CDN 丢失的静默兜底）
+    function setupMarkedRenderer() {
+      if (typeof marked === 'undefined') {
+        console.warn("Marked.js not loaded, using fallback parser");
+        return;
+      }
+
+      const renderer = new marked.Renderer();
+
+      // H1 (由头部统一管理)
+      renderer.heading = function(text, level) {
+        if (level === 1) return ``;
+        
+        if (level === 2) {
+          // 第2字号：小节标题 + 贯穿横细线
+          return `<div class="res-section-title">${text}</div>`;
+        }
+        
+        if (level === 3) {
+          // 机构/职位/项目名称 (左) 与 时间 (右)
+          let title = text;
+          let dateStr = "";
+          if (text.includes('|')) {
+            const parts = text.split('|');
+            title = parts[0].trim();
+            dateStr = parts.slice(1).join('|').trim();
+          } else if (text.includes('—')) {
+            const parts = text.split('—');
+            title = parts[0].trim();
+            dateStr = parts.slice(1).join('—').trim();
+          }
+
+          return `
+            <div class="flex justify-between items-baseline font-bold mt-1.5 mb-0.5 res-body">
+              <span>${title}</span>
+              ${dateStr ? `<span class="res-date font-normal text-slate-700 font-sans">${dateStr}</span>` : ''}
+            </div>
+          `;
+        }
+
+        return `<div class="font-bold my-1 res-body">${text}</div>`;
+      };
+
+      renderer.listitem = function(text) {
+        return `<li class="res-body">${text}</li>`;
+      };
+
+      renderer.paragraph = function(text) {
+        return `<p class="res-body mb-1 text-justify">${text}</p>`;
+      };
+
+      marked.setOptions({ renderer: renderer, breaks: true });
+    }
+
+    // 内置轻量 Markdown 兜底解析器（防止外网 CDN 拦截导致空白）
+    function fallbackMarkdownParse(mdText) {
+      const lines = mdText.split('\n');
+      let html = '';
+      let inList = false;
+
+      for (let line of lines) {
+        let trimmed = line.trim();
+        if (trimmed.startsWith('## ')) {
+          if (inList) { html += '</ul>'; inList = false; }
+          html += `<div class="res-section-title">${trimmed.substring(3)}</div>`;
+        } else if (trimmed.startsWith('### ')) {
+          if (inList) { html += '</ul>'; inList = false; }
+          const h3Content = trimmed.substring(4);
+          let title = h3Content;
+          let dateStr = '';
+          if (h3Content.includes('|')) {
+            const spl = h3Content.split('|');
+            title = spl[0].trim();
+            dateStr = spl.slice(1).join('|').trim();
+          }
+          html += `<div class="flex justify-between items-baseline font-bold mt-1.5 mb-0.5 res-body">
+            <span>${title}</span>
+            ${dateStr ? `<span class="res-date font-normal text-slate-700 font-sans">${dateStr}</span>` : ''}
+          </div>`;
+        } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+          if (!inList) { html += '<ul>'; inList = true; }
+          let liText = trimmed.substring(2).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+          html += `<li class="res-body">${liText}</li>`;
+        } else if (trimmed.length > 0) {
+          if (inList) { html += '</ul>'; inList = false; }
+          let pText = trimmed.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+          html += `<p class="res-body mb-1 text-justify">${pText}</p>`;
+        }
+      }
+      if (inList) { html += '</ul>'; }
+      return html;
+    }
+
+    // 解析与渲染
+    function renderResume() {
+      const elNP = document.getElementById('editor-name-phone');
+      const elContact = document.getElementById('editor-contact');
+      const elBody = document.getElementById('editor-body');
+
+      const rawNP = elNP ? elNP.value.trim() : resumeData[currentLang].namePhone;
+      const rawContact = elContact ? elContact.value : resumeData[currentLang].contact;
+      const rawBody = elBody ? elBody.value : resumeData[currentLang].body;
+
+      // 1. 解析姓名与电话
+      let name = currentLang === 'zh' ? "你的姓名" : "YOUR NAME";
+      let phone = "";
+      if (rawNP.includes('|')) {
+        const parts = rawNP.split('|');
+        name = parts[0].trim();
+        phone = parts.slice(1).join('|').trim();
+      } else {
+        name = rawNP;
+      }
+
+      const elName = document.getElementById('res-name-display');
+      const elPhone = document.getElementById('res-phone-display');
+      if (elName) elName.innerText = name;
+      if (elPhone) {
+        elPhone.innerText = phone;
+        elPhone.style.display = phone ? 'inline-block' : 'none';
+      }
+
+      // 动态同步文件名中的姓名
+      assembleFileName();
+
+      // 2. 解析联系方式 (分为左列邮箱/领英，右列地址/到岗状态)
+      const contactLines = rawContact.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      let emailLines = [];
+      let addrLines = [];
+
+      for (let line of contactLines) {
+        let content = line;
+        if (content.startsWith('- ') || content.startsWith('* ')) {
+          content = content.substring(2).trim();
+        }
+        if (content.includes('地址') || content.includes('Location') || content.includes('City') || content.includes('实习') || content.includes('internship') || content.includes('Available')) {
+          addrLines.push(content);
+        } else {
+          emailLines.push(content);
+        }
+      }
+
+      // 格式化左列：邮箱/主页
+      const contactCol = document.getElementById('res-contact-col');
+      if (contactCol) {
+        contactCol.innerHTML = emailLines.map(item => {
+          let cleaned = item.replace(/\*\*(.*?)\*\*/g, '').replace(/[:：]/g, '').trim();
+          if (cleaned.includes('linkedin.com') || cleaned.includes('http')) {
+            const url = cleaned.startsWith('http') ? cleaned : 'https://' + cleaned;
+            return `<div><a href="${url}" target="_blank" class="hover:underline">${cleaned}</a></div>`;
+          }
+          return `<div>${cleaned}</div>`;
+        }).join('');
+      }
+
+      // 格式化右列：地址与到岗说明
+      const addrCol = document.getElementById('res-address-col');
+      if (addrCol) {
+        addrCol.innerHTML = addrLines.map(item => {
+          let html = item.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+          return `<div>${html}</div>`;
+        }).join('');
+      }
+
+      // 3. 解析简历正文
+      const bodyContentEl = document.getElementById('resume-body-content');
+      if (bodyContentEl) {
+        if (typeof marked !== 'undefined') {
+          bodyContentEl.innerHTML = marked.parse(rawBody);
+        } else {
+          bodyContentEl.innerHTML = fallbackMarkdownParse(rawBody);
+        }
+      }
+
+      // 检查高度与页数合规状态
+      setTimeout(checkPageConstraints, 60);
+    }
+
+    function onContentChange() {
+      const elNP = document.getElementById('editor-name-phone');
+      const elContact = document.getElementById('editor-contact');
+      const elBody = document.getElementById('editor-body');
+
+      if (elNP && elContact && elBody) {
+        resumeData[currentLang] = {
+          namePhone: elNP.value,
+          contact: elContact.value,
+          body: elBody.value
+        };
+      }
+      saveState();          // 每次编辑自动持久化
+      renderResume();
+    }
+
+    // (1) 页边距控制函数 (上下与左右)
+    function applyPadding(type, val) {
+      val = parseInt(val, 10);
+      if (type === 'v') {
+        document.documentElement.style.setProperty('--pad-v', `${val}mm`);
+        document.getElementById('val-pad-v').innerText = `${val}mm`;
+      } else if (type === 'h') {
+        document.documentElement.style.setProperty('--pad-h', `${val}mm`);
+        document.getElementById('val-pad-h').innerText = `${val}mm`;
+      }
+      checkPageConstraints();
+    }
+
+    // (2) 字号调整与联动控制
+    function applyFontSize(type, val) {
+      val = parseFloat(val);
+      if (type === 'title') {
+        document.documentElement.style.setProperty('--fz-title', `${val}px`);
+        document.getElementById('val-title').innerText = `${val}px`;
+      } else if (type === 'sec') {
+        document.documentElement.style.setProperty('--fz-section', `${val}px`);
+        document.getElementById('val-sec').innerText = `${val}px`;
+      } else if (type === 'body') {
+        document.documentElement.style.setProperty('--fz-body', `${val}px`);
+        document.getElementById('val-body').innerText = `${val}px`;
+        // 第4字号严格联动
+        const metaVal = (val * 0.9).toFixed(1);
+        document.documentElement.style.setProperty('--fz-meta', `${metaVal}px`);
+        document.getElementById('val-meta').innerText = `${metaVal}px`;
+      }
+      checkPageConstraints();
+    }
+
+    // 更新上下限
+    function updateBounds() {
+      const tMin = document.getElementById('fz-title-min').value;
+      const tMax = document.getElementById('fz-title-max').value;
+      const sMin = document.getElementById('fz-sec-min').value;
+      const sMax = document.getElementById('fz-sec-max').value;
+      const bMin = document.getElementById('fz-body-min').value;
+      const bMax = document.getElementById('fz-body-max').value;
+
+      const slTitle = document.getElementById('slider-title');
+      slTitle.min = tMin; slTitle.max = tMax;
+
+      const slSec = document.getElementById('slider-sec');
+      slSec.min = sMin; slSec.max = sMax;
+
+      const slBody = document.getElementById('slider-body');
+      slBody.min = bMin; slBody.max = bMax;
+
+      showToast("已更新字号上下限调节范围", "check");
+    }
+
+    // 检查页数限制并绘制指示线
+    function checkPageConstraints() {
+      const doc = document.getElementById('resume-document');
+      if (!doc) return;
+      const a4SinglePageHeight = 1122; // A4在标准96dpi下的像素高度
+      const maxAllowedPages = currentLang === 'zh' ? 1 : 2;
+
+      // 移除原有的截断指示线
+      document.querySelectorAll('.page-indicator-line').forEach(el => el.remove());
+
+      // 绘制分页辅助虚线
+      for (let p = 1; p <= maxAllowedPages; p++) {
+        const line = document.createElement('div');
+        line.className = 'page-indicator-line';
+        line.style.top = `${p * a4SinglePageHeight}px`;
+        line.setAttribute('data-label', `第 ${p} 页`);
+        doc.appendChild(line);
+      }
+    }
+
+    // 画布缩放工具
+    function setZoom(zoom) {
+      currentZoom = Math.max(0.4, Math.min(1.5, zoom));
+      const wrapper = document.getElementById('a4-wrapper');
+      if (wrapper) {
+        wrapper.style.transform = `scale(${currentZoom})`;
+      }
+      document.getElementById('zoom-level-text').innerText = `${Math.round(currentZoom * 100)}%`;
+    }
+
+    function adjustZoom(delta) {
+      setZoom(currentZoom + delta);
+    }
+
+    function autoFitZoom() {
+      const container = document.getElementById('preview-container');
+      if (!container) return;
+      const availableWidth = container.clientWidth - 48; // 留出内边距
+      const a4PixelWidth = 794; // 210mm 对应的标准像素宽度
+      if (availableWidth > 0 && availableWidth < a4PixelWidth) {
+        const fitScale = Math.floor((availableWidth / a4PixelWidth) * 100) / 100;
+        setZoom(fitScale);
+      } else {
+        setZoom(1);
+      }
+    }
+
+    // 标题与姓名颜色更改
+    function applyColor(hex) {
+      document.documentElement.style.setProperty('--theme-color', hex);
+      document.getElementById('color-picker').value = hex;
+      showToast(`已更换标题与姓名颜色: ${hex}`, "palette");
+    }
+
+    // 照片占位符开关
+    function togglePhoto(enable) {
+      showPhoto = enable;
+      const el = document.getElementById('photo-container');
+      if (el) {
+        if (enable) {
+          el.classList.remove('hidden');
+        } else {
+          el.classList.add('hidden');
+        }
+      }
+      checkPageConstraints();
+      showToast(enable ? "已显示照片占位符" : "已隐藏照片占位符", "image");
+    }
+
+    // 中英文切换
+    function switchLang(lang) {
+      currentLang = lang;
+      const tabZh = document.getElementById('tab-zh');
+      const tabEn = document.getElementById('tab-en');
+
+      if (lang === 'zh') {
+        tabZh.className = "px-3 py-1 text-xs font-semibold rounded-md transition-all bg-white text-slate-900 shadow-xs";
+        tabEn.className = "px-3 py-1 text-xs font-semibold rounded-md transition-all text-slate-600 hover:text-slate-900";
+        document.getElementById('fn-company').value = "腾讯";
+        document.getElementById('fn-job').value = "产品经理";
+      } else {
+        tabEn.className = "px-3 py-1 text-xs font-semibold rounded-md transition-all bg-white text-slate-900 shadow-xs";
+        tabZh.className = "px-3 py-1 text-xs font-semibold rounded-md transition-all text-slate-600 hover:text-slate-900";
+        document.getElementById('fn-company').value = "Philips";
+        document.getElementById('fn-job').value = "DesignIntern";
+      }
+
+      // 仅恢复该语言下已保存的内容；若从未保存过则编辑器保持空白
+      loadStateForLang(lang);
+      renderResume();
+      assembleFileName();
+      showToast(`已切换至${lang === 'zh' ? '中文简历 (1页)' : '英文简历 (2页)'}`, "language");
+    }
+
+    // 纯前端 PDF 导出 — 使用浏览器原生打印（文字可选中、可搜索）
+    function exportToPDF() {
+      const btn = document.getElementById('btn-export');
+      const wrapper = document.getElementById('a4-wrapper');
+      const resumeDoc = document.getElementById('resume-document');
+      const previewContainer = document.getElementById('preview-container');
+
+      // 读取用户输入修改后的文件名
+      const rawFileName = document.getElementById('export-filename').value.trim();
+      let sanitizedFileName = rawFileName.replace(/[\/\\:*?"<>|]/g, '_');
+      if (!sanitizedFileName) {
+        sanitizedFileName = currentLang === 'zh' ? '目标公司_目标职位_姓名_简历' : 'TargetCompany_Role_Name_Resume';
+      }
+      if (!sanitizedFileName.toLowerCase().endsWith('.pdf')) {
+        sanitizedFileName += '.pdf';
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1.5 text-rose-400"></i> 导出中...`;
+      showToast(`正在生成 "${sanitizedFileName}"...（请在打印对话框中选择"另存为 PDF"）`, "file-pdf");
+
+      // 隐藏指示线
+      document.querySelectorAll('.page-indicator-line').forEach(el => el.style.display = 'none');
+
+      // 将 resume-document 从 wrapper 移出，直接挂到 preview-container，脱离 transform 约束
+      const wrapperTransformBak = wrapper.style.transform;
+      wrapper.style.transform = 'none';
+      previewContainer.style.overflow = 'visible';
+      previewContainer.style.background = 'white';
+
+      // 关键：把 resume 移到 body 下，同时清除所有父容器的 transform
+      document.body.appendChild(resumeDoc);
+      resumeDoc.style.position = 'relative';
+      resumeDoc.style.top = '0';
+      resumeDoc.style.left = '0';
+      resumeDoc.style.width = '210mm';
+      resumeDoc.style.height = 'auto';
+      resumeDoc.style.minHeight = '297mm';
+      resumeDoc.style.zIndex = '99999';
+      resumeDoc.style.background = 'white';
+      resumeDoc.style.margin = '0';
+      resumeDoc.style.padding = 'var(--pad-v) var(--pad-h)';
+      resumeDoc.style.boxShadow = 'none';
+      resumeDoc.style.transform = 'none';
+      resumeDoc.style.boxSizing = 'border-box';
+
+      setTimeout(() => {
+        // 浏览器打印保存时会用页面标题作为建议文件名，临时改成用户输入的文件名
+        const originalTitle = document.title;
+        document.title = sanitizedFileName.replace('.pdf', '');
+
+        window.print();
+
+        setTimeout(() => {
+          // 恢复原标题
+          document.title = originalTitle;
+
+          // 恢复原位
+          wrapper.insertBefore(resumeDoc, wrapper.firstChild);
+          resumeDoc.style.position = '';
+          resumeDoc.style.top = '';
+          resumeDoc.style.left = '';
+          resumeDoc.style.width = '';
+          resumeDoc.style.height = '';
+          resumeDoc.style.minHeight = '';
+          resumeDoc.style.zIndex = '';
+          resumeDoc.style.background = '';
+          resumeDoc.style.margin = '';
+          resumeDoc.style.padding = '';
+          resumeDoc.style.boxShadow = '';
+          resumeDoc.style.transform = '';
+          resumeDoc.style.boxSizing = '';
+          wrapper.style.transform = wrapperTransformBak;
+          previewContainer.style.overflow = '';
+          previewContainer.style.background = '';
+          document.querySelectorAll('.page-indicator-line').forEach(el => el.style.display = 'block');
+
+          btn.disabled = false;
+          btn.innerHTML = `<i class="fa-solid fa-file-pdf mr-1.5 text-rose-400"></i> 导出 PDF（文字可选）`;
+        }, 300);
+      }, 200);
+    }
+
+    // localStorage 持久化保存与恢复（中文/英文内容完全独立存储）
+    const STORAGE_KEY = 'cleanresume_v2';
+
+    function saveState() {
+      try {
+        // 读取已有完整数据（保留另一语言内容）
+        let full = {};
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          try { full = JSON.parse(raw); } catch (e) { full = {}; }
+        }
+
+        // 当前语言的编辑器内容
+        full[currentLang] = {
+          namePhone: document.getElementById('editor-name-phone')?.value || '',
+          contact:   document.getElementById('editor-contact')?.value || '',
+          body:      document.getElementById('editor-body')?.value || '',
+        };
+
+        // 全局设置（取当前值，不区分语言）
+        full._global = {
+          lang:        currentLang,
+          showPhoto:   showPhoto,
+          zoom:        currentZoom,
+          padV:        getComputedStyle(document.documentElement).getPropertyValue('--pad-v').trim(),
+          padH:        getComputedStyle(document.documentElement).getPropertyValue('--pad-h').trim(),
+          fzTitle:     getComputedStyle(document.documentElement).getPropertyValue('--fz-title').trim(),
+          fzSec:       getComputedStyle(document.documentElement).getPropertyValue('--fz-section').trim(),
+          fzBody:      getComputedStyle(document.documentElement).getPropertyValue('--fz-body').trim(),
+          themeColor:  getComputedStyle(document.documentElement).getPropertyValue('--theme-color').trim(),
+          fnCompany:   document.getElementById('fn-company')?.value || '',
+          fnJob:       document.getElementById('fn-job')?.value || '',
+        };
+
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(full));
+        showToast('保存成功', 'circle-check');
+      } catch (e) {
+        showToast('保存失败：' + e.message, 'circle-xmark');
+      }
+    }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return false;
+        const full = JSON.parse(raw);
+        if (!full || !full._global) return false;
+
+        const g = full._global;
+
+        // 恢复语言
+        if (g.lang) {
+          currentLang = g.lang;
+          const tabZh = document.getElementById('tab-zh');
+          const tabEn = document.getElementById('tab-en');
+          if (currentLang === 'zh') {
+            tabZh.className = "px-3 py-1 text-xs font-semibold rounded-md transition-all bg-white text-slate-900 shadow-xs";
+            tabEn.className = "px-3 py-1 text-xs font-semibold rounded-md transition-all text-slate-600 hover:text-slate-900";
+          } else {
+            tabEn.className = "px-3 py-1 text-xs font-semibold rounded-md transition-all bg-white text-slate-900 shadow-xs";
+            tabZh.className = "px-3 py-1 text-xs font-semibold rounded-md transition-all text-slate-600 hover:text-slate-900";
+          }
+        }
+
+        // 恢复当前语言的编辑器内容（若不存在则留空）
+        const langData = full[currentLang] || {};
+        const elNP = document.getElementById('editor-name-phone');
+        const elContact = document.getElementById('editor-contact');
+        const elBody = document.getElementById('editor-body');
+        if (elNP)     elNP.value     = langData.namePhone !== undefined ? langData.namePhone : '';
+        if (elContact) elContact.value = langData.contact   !== undefined ? langData.contact   : '';
+        if (elBody)   elBody.value   = langData.body        !== undefined ? langData.body      : '';
+
+        // 恢复全局设置
+        if (g.showPhoto !== undefined) {
+          showPhoto = g.showPhoto;
+          const photoEl = document.getElementById('photo-container');
+          if (photoEl) {
+            if (showPhoto) photoEl.classList.remove('hidden');
+            else photoEl.classList.add('hidden');
+          }
+          const photoToggle = document.getElementById('photo-toggle');
+          if (photoToggle) photoToggle.checked = showPhoto;
+        }
+
+        if (g.padV)     document.documentElement.style.setProperty('--pad-v', g.padV);
+        if (g.padH)     document.documentElement.style.setProperty('--pad-h', g.padH);
+        if (g.fzTitle)  document.documentElement.style.setProperty('--fz-title', g.fzTitle);
+        if (g.fzSec)    document.documentElement.style.setProperty('--fz-section', g.fzSec);
+        if (g.fzBody) {
+          document.documentElement.style.setProperty('--fz-body', g.fzBody);
+          const metaVal = (parseFloat(g.fzBody) * 0.9).toFixed(1);
+          document.documentElement.style.setProperty('--fz-meta', `${metaVal}px`);
+        }
+        if (g.themeColor) document.documentElement.style.setProperty('--theme-color', g.themeColor);
+        if (g.fnCompany !== undefined) { const el = document.getElementById('fn-company'); if (el) el.value = g.fnCompany; }
+        if (g.fnJob     !== undefined) { const el = document.getElementById('fn-job');     if (el) el.value = g.fnJob; }
+
+        syncSliderValues();
+        return true;
+      } catch (e) {
+        console.warn('loadState failed:', e);
+        return false;
+      }
+    }
+
+    function syncSliderValues() {
+      const style = getComputedStyle(document.documentElement);
+      const v = style.getPropertyValue('--pad-v').trim();
+      const h = style.getPropertyValue('--pad-h').trim();
+      const t = style.getPropertyValue('--fz-title').trim();
+      const s = style.getPropertyValue('--fz-section').trim();
+      const b = style.getPropertyValue('--fz-body').trim();
+      const m = style.getPropertyValue('--fz-meta').trim();
+
+      const elVp = document.getElementById('val-pad-v');
+      if (elVp) elVp.innerText = v;
+      const elVh = document.getElementById('val-pad-h');
+      if (elVh) elVh.innerText = h;
+      const elT = document.getElementById('val-title');
+      if (elT) elT.innerText = t;
+      const elS = document.getElementById('val-sec');
+      if (elS) elS.innerText = s;
+      const elB = document.getElementById('val-body');
+      if (elB) elB.innerText = b;
+      const elM = document.getElementById('val-meta');
+      if (elM) elM.innerText = m;
+    }
+
+    function showToast(msg, icon = 'circle-check') {
+      const toast = document.getElementById('toast');
+      const msgEl = document.getElementById('toast-msg');
+      const iconEl = document.getElementById('toast-icon');
+
+      msgEl.innerText = msg;
+      iconEl.className = `fa-solid fa-${icon} text-emerald-400`;
+
+      toast.classList.remove('opacity-0', 'pointer-events-none');
+      toast.classList.add('opacity-100');
+
+      clearTimeout(window.toastTimer);
+      window.toastTimer = setTimeout(() => {
+        toast.classList.remove('opacity-100');
+        toast.classList.add('opacity-0', 'pointer-events-none');
+      }, 2400);
+    }
+  </script>
+</body>
+</html>
