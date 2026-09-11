@@ -1152,7 +1152,8 @@
     }
 
     // localStorage 持久化保存与恢复（中文/英文内容完全独立存储）
-    const STORAGE_KEY = 'cleanresume_v2';
+    // 注意：键名与个人使用的版本不同，避免从同一 file:// 源继承旧的已保存内容
+    const STORAGE_KEY = 'cleanresume_template_v1';
 
     function saveState() {
       try {
